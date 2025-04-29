@@ -1,0 +1,14 @@
+{
+  "name": "Gravitee Customer Tool",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "settings": {
+    "python.defaultInterpreterPath": "/workspace/venv/bin/python"
+  },
+  "postCreateCommand": "python3 -m venv venv && . venv/bin/activate && pip install --upgrade pip && pip install requests python-dotenv",
+  "extensions": [
+    "ms-python.python",
+    "ms-python.vscode-pylance"
+  ]
+}
