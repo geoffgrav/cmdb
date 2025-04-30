@@ -22,11 +22,11 @@ logging.basicConfig(
 
 def get_v1_base_url(url):
     """Get V1 API base URL"""
-    return f"{url}/management/organizations/DEFAULT/environments/601e1282-73a1-498c-9e12-8273a1698cf7"
+    return f"{url}/management/organizations/DEFAULT/environments/DEFAULT"
 
 def get_v2_base_url(url):
     """Get V2 API base URL"""
-    return f"{url}/management/v2/environments/601e1282-73a1-498c-9e12-8273a1698cf7"
+    return f"{url}/management/v2/environments/DEFAULT"
 
 def get_customer_id(url):
     """Extract customer ID from URL"""
