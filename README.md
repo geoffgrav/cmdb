@@ -95,5 +95,5 @@ This tool makes it easy for anyone to pull Gravitee customer data safely and rep
 
 ---
 
-Happy extracting! 🚀
+
 
