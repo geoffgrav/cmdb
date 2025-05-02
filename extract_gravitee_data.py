@@ -123,6 +123,23 @@ def fetch_apis(base_url, headers, session):
 
     return all_apis
 
+def fetch_api_plans(api_id, base_url, headers, session):
+    """Fetch API plans using V2 endpoint with pagination"""
+    try:
+        url = f"{get_v2_base_url(base_url)}/apis/{api_id}/plans?page=1&perPage=9999&statuses=STAGING,PUBLISHED,DEPRECATED,CLOSED"
+        logging.info(f"Fetching API plans from: {url}")
+        response = session.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        # Extract plans data from response
+        plans = data.get("data", [])
+        logging.info(f"Found {len(plans)} plans for API {api_id}")
+        return plans
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch plans for API {api_id}: {e}")
+        return []
+
 def fetch_api_pages(api_id, base_url, headers, session):
     """Fetch API documentation pages using V2 endpoint with enhanced processing"""
     try:
@@ -438,7 +455,8 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
             "type": api_details.get("type", "unknown"),
             "plans": {
                 "count_per_type": {},
-                "total": 0
+                "total": 0,
+                "items": []  # Store actual plan items
             },
             "subscriptions": {
                 "count": 0
@@ -536,22 +554,105 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
                 "fetchers": []
             }
 
-        # Process plans
-        plans = api_details.get("plans", [])
+        # Fetch and process plans
+        plans = fetch_api_plans(api_id, base_url, headers, session)
         plan_type_counts = {}
+
         for plan in plans:
-            plan_type = plan.get("security", "unknown").lower()
+            # Extract the security type correctly from the plan data
+            if isinstance(plan.get("security"), dict):
+                plan_type = plan.get("security", {}).get("type", "unknown").lower()
+            else:
+                plan_type = plan.get("security", "unknown").lower()
+
             plan_type_counts[plan_type] = plan_type_counts.get(plan_type, 0) + 1
 
+            # Add the plan to the items list
+            plan_data = {
+                "id": plan.get("id", "unknown"),
+                "name": plan.get("name", "unknown"),
+                "description": plan.get("description", ""),
+                "security_type": plan_type,
+                "status": plan.get("status", "unknown"),
+                "order": plan.get("order", 0),
+                "mode": plan.get("mode", "unknown"),
+                "created_at": plan.get("createdAt", ""),
+                "updated_at": plan.get("updatedAt", ""),
+                "published_at": plan.get("publishedAt", ""),
+                "validation": plan.get("validation", "unknown"),
+                "comment_required": plan.get("commentRequired", False),
+                "type": plan.get("type", "unknown")
+            }
+
+            # Add security configuration if available
+            if isinstance(plan.get("security"), dict) and "configuration" in plan.get("security", {}):
+                plan_data["security_config"] = plan.get("security", {}).get("configuration", {})
+
+            # Process flows if available
             plan_flows = plan.get("flows", [])
+            if plan_flows:
+                plan_data["flows"] = []
+                for flow in plan_flows:
+                    flow_data = {
+                        "id": flow.get("id", "unknown"),
+                        "name": flow.get("name", ""),
+                        "enabled": flow.get("enabled", False),
+                        "path": "",
+                        "methods": []
+                    }
+
+                    # Extract selectors
+                    selectors = flow.get("selectors", [])
+                    for selector in selectors:
+                        if selector.get("type") == "HTTP":
+                            flow_data["path"] = selector.get("path", "")
+                            flow_data["path_operator"] = selector.get("pathOperator", "")
+                            flow_data["methods"] = selector.get("methods", [])
+
+                    # Process request policies
+                    request_policies = []
+                    for policy in flow.get("request", []):
+                        policy_data = {
+                            "name": policy.get("name", "unknown"),
+                            "description": policy.get("description", ""),
+                            "enabled": policy.get("enabled", False),
+                            "policy": policy.get("policy", "unknown"),
+                            "configuration": policy.get("configuration", {})
+                        }
+                        request_policies.append(policy_data)
+
+                    flow_data["request_policies"] = request_policies
+
+                    # Process response policies
+                    response_policies = []
+                    for policy in flow.get("response", []):
+                        policy_data = {
+                            "name": policy.get("name", "unknown"),
+                            "description": policy.get("description", ""),
+                            "enabled": policy.get("enabled", False),
+                            "policy": policy.get("policy", "unknown"),
+                            "configuration": policy.get("configuration", {})
+                        }
+                        response_policies.append(policy_data)
+
+                    flow_data["response_policies"] = response_policies
+
+                    # Add the flow to the plan's flows
+                    plan_data["flows"].append(flow_data)
+
+            # Add the plan to the list of items
+            api_data["plans"]["items"].append(plan_data)
+
+            # Process plan flows for policy extraction (for backward compatibility)
             if plan_flows:
                 plan_policies = extract_policies_from_flows(
                     plan_flows,
                     plan_name=plan.get("name", "unknown"),
-                    plan_security=plan.get("security", "unknown")
+                    plan_security=plan_type
                 )
                 api_data["design"]["policies_per_flow"].extend(plan_policies)
 
+        # Update the plan counts
         api_data["plans"]["count_per_type"] = plan_type_counts
         api_data["plans"]["total"] = len(plans)
 
@@ -590,7 +691,7 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
         # Process entrypoints
         listeners = api_details.get("listeners", [])
         all_entrypoints = []
-        
+
         # Extract entrypoints from each listener
         for listener in listeners:
             listener_entrypoints = listener.get("entrypoints", [])
@@ -605,7 +706,7 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
                     "inherit": entrypoint.get("inherit", True)
                 }
                 all_entrypoints.append(entrypoint_data)
-        
+
         # Store the collected entrypoints
         api_data["entrypoints"] = all_entrypoints
 
@@ -643,7 +744,7 @@ def main():
                     logging.error(f"No API token available for customer {customer['customer_name']}")
                     continue
 
-                headers = {"Authorization": f"Bearer {customer['api_token']}"}
+                headers = {"Authorization": f"Basic {customer['api_token']}"}
 
                 # Initialize data collection
                 # Initialize data collection structure
