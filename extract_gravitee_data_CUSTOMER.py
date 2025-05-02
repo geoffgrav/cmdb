@@ -744,7 +744,7 @@ def main():
                     logging.error(f"No API token available for customer {customer['customer_name']}")
                     continue
 
-                headers = {"Authorization": f"Basic {customer['api_token']}"}
+                headers = {"Authorization": f"Bearer {customer['api_token']}"}
 
                 # Initialize data collection
                 # Initialize data collection structure
