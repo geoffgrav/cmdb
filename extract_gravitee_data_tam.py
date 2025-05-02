@@ -434,7 +434,7 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
         # Initialize API data structure
         api_data = {
             "name": api_name,
-            "version": api_details.get("version", "unknown"),
+            "version": api_details.get("apiVersion", "unknown"),
             "type": api_details.get("type", "unknown"),
             "plans": {
                 "count_per_type": {},
