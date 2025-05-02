@@ -473,7 +473,10 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
                 "count": 0,
                 "details": []
             },
-            "entrypoints": []
+            "entrypoints": {
+                "count": 0,
+                "details": []
+            }
         }
 
         # Process dictionaries
