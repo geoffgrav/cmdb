@@ -588,13 +588,26 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
             api_data["endpoint_groups"]["details"].append(group_info)
 
         # Process entrypoints
-        entrypoints = api_details.get("entrypoints", [])
-        api_data["entrypoints"] = [{
-            "type": entrypoint.get("type", "default"),
-            "target": entrypoint.get("target", "unknown"),
-            "tags": entrypoint.get("tags", []),
-            "inherit": entrypoint.get("inherit", True)
-        } for entrypoint in entrypoints]
+        listeners = api_details.get("listeners", [])
+        all_entrypoints = []
+        
+        # Extract entrypoints from each listener
+        for listener in listeners:
+            listener_entrypoints = listener.get("entrypoints", [])
+            for entrypoint in listener_entrypoints:
+                entrypoint_data = {
+                    "type": entrypoint.get("type", "default"),
+                    "qos": entrypoint.get("qos", "unknown"),  # Include qos field
+                    "configuration": entrypoint.get("configuration", {}),  # Include configuration
+                    # You can keep these fields as defaults if they might exist in other API versions
+                    "target": entrypoint.get("target", "unknown"),
+                    "tags": entrypoint.get("tags", []),
+                    "inherit": entrypoint.get("inherit", True)
+                }
+                all_entrypoints.append(entrypoint_data)
+        
+        # Store the collected entrypoints
+        api_data["entrypoints"] = all_entrypoints
 
         collected_data["apis"]["details"][api_id] = api_data
         return collected_data
