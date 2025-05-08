@@ -28,20 +28,20 @@ def get_v2_base_url(url):
     """Get V2 API base URL"""
     return f"{url}/management/v2/environments/DEFAULT"
 
-def get_customer_id(url):
-    """Extract customer ID from URL (e.g., 'cardiff' from 'demo.apim.cardiff.az.gravitee.io')"""
-    try:
-        parsed_url = urlparse(url)
-        parts = parsed_url.netloc.split('.')
-        if 'gravitee' in parts:
-            gravitee_index = parts.index('gravitee')
-            if gravitee_index >= 3:
-                return parts[gravitee_index - 3].lower()
-            else:
-                logging.warning("Not enough parts in domain to extract customer ID")
-    except Exception as e:
-        logging.error(f"Error parsing URL for customer ID: {e}")
-    return "default"
+# def get_customer_id(url):
+#     """Extract customer ID from URL (e.g., 'cardiff' from 'demo.apim.cardiff.az.gravitee.io')"""
+#     try:
+#         parsed_url = urlparse(url)
+#         parts = parsed_url.netloc.split('.')
+#         if 'gravitee' in parts:
+#             gravitee_index = parts.index('gravitee')
+#             if gravitee_index >= 3:
+#                 return parts[gravitee_index - 3].lower()
+#             else:
+#                 logging.warning("Not enough parts in domain to extract customer ID")
+#     except Exception as e:
+#         logging.error(f"Error parsing URL for customer ID: {e}")
+#     return "default"
 
 def create_session():
     """Create a requests session with retry logic"""
@@ -798,7 +798,8 @@ def main():
                 # Initialize data collection structure
                 collected_data = {
                     "customer_info": {
-                        "customer_id": get_customer_id(customer['gravitee_url']),
+                        # "customer_id": get_customer_id(customer['gravitee_url']),
+                        "customer_id": customer['customer_name'],
                         "customer_name": customer['customer_name'],
                         "gravitee_url": customer['gravitee_url'],
                         "extraction_date": datetime.datetime.now().isoformat()
@@ -1034,7 +1035,8 @@ def main():
                 # Save collected data
                 if collected_data["apis"]["details"]:
                     try:
-                        customer_id = get_customer_id(customer['gravitee_url'])
+                        # customer_id = get_customer_id(customer['gravitee_url'])
+                        customer_id = customer['customer_name']
                         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
                         # Save main data file
