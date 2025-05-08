@@ -29,16 +29,18 @@ def get_v2_base_url(url):
     return f"{url}/management/v2/environments/DEFAULT"
 
 def get_customer_id(url):
-    """Extract customer ID from URL"""
+    """Extract customer ID from URL (e.g., 'cardiff' from 'demo.apim.cardiff.az.gravitee.io')"""
     try:
         parsed_url = urlparse(url)
         parts = parsed_url.netloc.split('.')
-        for i, part in enumerate(parts):
-            if 'gravitee' in part:
-                return parts[i-1].lower()
+        if 'gravitee' in parts:
+            gravitee_index = parts.index('gravitee')
+            if gravitee_index >= 3:
+                return parts[gravitee_index - 3].lower()
+            else:
+                logging.warning("Not enough parts in domain to extract customer ID")
     except Exception as e:
         logging.error(f"Error parsing URL for customer ID: {e}")
-        return "default"
     return "default"
 
 def create_session():
@@ -445,6 +447,40 @@ def extract_policies_from_flows(flows, plan_name="", plan_security=""):
 
     return policies_info
 
+def fetch_api_analytics(api_id, base_url, headers, session, days=30):
+    """Fetch API analytics (hit counts) for a given time period"""
+    try:
+        current_time = int(time.time() * 1000)
+        from_time = current_time - (days * 24 * 60 * 60 * 1000)
+
+        url = f"{base_url}/management/organizations/DEFAULT/environments/DEFAULT/apis/{api_id}/analytics"
+        params = {
+            'type': 'COUNT',
+            'from': from_time,
+            'to': current_time,
+            'interval': 86400000  # 1 day
+        }
+
+        logging.info(f"Fetching analytics for API {api_id} from {from_time} to {current_time}")
+        response = session.get(url, headers=headers, params=params)
+        response.raise_for_status()
+
+        data = response.json()
+        return {
+            "total_hits": data.get("hits", 0),
+            "time_period": f"last_{days}_days",
+            "from_timestamp": from_time,
+            "to_timestamp": current_time,
+            "raw_data": data
+        }
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch analytics for API {api_id}: {e}")
+        return {
+            "total_hits": 0,
+            "time_period": f"last_{days}_days",
+            "error": str(e)
+        }
+
 def process_api_details(api_id, api_name, api_details, collected_data, base_url, headers, session):
     """Process details for a single API with enhanced documentation handling"""
     try:
@@ -706,6 +742,18 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
                     "inherit": entrypoint.get("inherit", True)
                 }
                 all_entrypoints.append(entrypoint_data)
+        
+        # Fetch API analytics
+        try:
+            analytics = fetch_api_analytics(api_id, base_url, headers, session)
+            api_data["analytics"] = analytics
+            logging.info(f"API {api_id} had {analytics['total_hits']} hits in last 30 days")
+        except Exception as e:
+            logging.error(f"Error fetching analytics for API {api_id}: {e}")
+            api_data["analytics"] = {
+                "total_hits": 0,
+                "error": str(e)
+            }
 
         # Store the collected entrypoints
         api_data["entrypoints"] = all_entrypoints
