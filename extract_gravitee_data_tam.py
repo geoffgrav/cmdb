@@ -28,20 +28,20 @@ def get_v2_base_url(url):
     """Get V2 API base URL"""
     return f"{url}/management/v2/environments/DEFAULT"
 
-# def get_customer_id(url):
-#     """Extract customer ID from URL (e.g., 'cardiff' from 'demo.apim.cardiff.az.gravitee.io')"""
-#     try:
-#         parsed_url = urlparse(url)
-#         parts = parsed_url.netloc.split('.')
-#         if 'gravitee' in parts:
-#             gravitee_index = parts.index('gravitee')
-#             if gravitee_index >= 3:
-#                 return parts[gravitee_index - 3].lower()
-#             else:
-#                 logging.warning("Not enough parts in domain to extract customer ID")
-#     except Exception as e:
-#         logging.error(f"Error parsing URL for customer ID: {e}")
-#     return "default"
+def get_customer_id(url):
+    """Extract customer ID from URL (e.g., 'cardiff' from 'demo.apim.cardiff.az.gravitee.io')"""
+    try:
+        parsed_url = urlparse(url)
+        parts = parsed_url.netloc.split('.')
+        if 'gravitee' in parts:
+            gravitee_index = parts.index('gravitee')
+            if gravitee_index >= 3:
+                return parts[gravitee_index - 3].lower()
+            else:
+                logging.warning("Not enough parts in domain to extract customer ID")
+    except Exception as e:
+        logging.error(f"Error parsing URL for customer ID: {e}")
+    return "default"
 
 def create_session():
     """Create a requests session with retry logic"""
@@ -75,13 +75,20 @@ def read_customer_csv(csv_path):
                 customers.append({
                     'gravitee_url': row['gravitee_url'].strip().rstrip('/'),
                     'customer_name': row['customer_name'].strip(),
-                    'api_token': row.get('api_token', os.getenv("GRAVITEE_API_TOKEN", "")).strip()
+                    'username': row.get('username', '').strip(),
+                    'password': row.get('password', '').strip()
                 })
         logging.info(f"Successfully loaded {len(customers)} customers from CSV")
         return customers
     except Exception as e:
         logging.error(f"Error reading customer CSV: {e}")
         raise
+
+import base64
+
+def get_auth_header(username, password):
+    token = base64.b64encode(f"{username}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
 
 def fetch_apis(base_url, headers, session):
     """Fetch APIs using v2 endpoint with pagination"""
@@ -788,18 +795,17 @@ def main():
             try:
                 logging.info(f"Processing customer: {customer['customer_name']}")
 
-                if not customer['api_token']:
-                    logging.error(f"No API token available for customer {customer['customer_name']}")
+                if not customer['username'] or not customer['password']:
+                    logging.error(f"Missing username or password for customer {customer['customer_name']}")
                     continue
 
-                headers = {"Authorization": f"Basic {customer['api_token']}"}
+                headers = get_auth_header(customer['username'], customer['password'])
 
                 # Initialize data collection
                 # Initialize data collection structure
                 collected_data = {
                     "customer_info": {
-                        # "customer_id": get_customer_id(customer['gravitee_url']),
-                        "customer_id": customer['customer_name'],
+                        "customer_id": get_customer_id(customer['gravitee_url']),
                         "customer_name": customer['customer_name'],
                         "gravitee_url": customer['gravitee_url'],
                         "extraction_date": datetime.datetime.now().isoformat()
@@ -1035,8 +1041,7 @@ def main():
                 # Save collected data
                 if collected_data["apis"]["details"]:
                     try:
-                        # customer_id = get_customer_id(customer['gravitee_url'])
-                        customer_id = customer['customer_name']
+                        customer_id = get_customer_id(customer['gravitee_url'])
                         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
                         # Save main data file
