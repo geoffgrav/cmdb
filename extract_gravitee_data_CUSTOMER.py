@@ -5,6 +5,7 @@ import os
 import datetime
 import csv
 import time
+import base64
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from urllib3.util.retry import Retry
@@ -20,13 +21,13 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
-def get_v1_base_url(url):
+def get_v1_base_url(customer_csv):
     """Get V1 API base URL"""
-    return f"{url}/management/organizations/DEFAULT/environments/DEFAULT"
+    return f"{customer_csv['gravitee_url']}/management/organizations/{customer_csv['org_id']}/environments/{customer_csv['env_id']}"
 
-def get_v2_base_url(url):
+def get_v2_base_url(customer_csv):
     """Get V2 API base URL"""
-    return f"{url}/management/v2/environments/DEFAULT"
+    return f"{customer_csv['gravitee_url']}/management/v2/environments/{customer_csv['env_id']}"
 
 def get_customer_id(url):
     """Extract customer ID from URL (e.g., 'cardiff' from 'demo.apim.cardiff.az.gravitee.io')"""
@@ -74,9 +75,12 @@ def read_customer_csv(csv_path):
 
                 customers.append({
                     'gravitee_url': row['gravitee_url'].strip().rstrip('/'),
+                    'org_id': row['org_id'].strip(),
+                    'env_id': row['env_id'].strip(),
                     'customer_name': row['customer_name'].strip(),
-                    'username': row.get('username', '').strip(),
-                    'password': row.get('password', '').strip()
+                    'auth_method': row['auth_method'].strip(),
+                    'auth1': row.get('auth1', '').strip(),
+                    'auth2': row.get('auth2', '').strip()
                 })
         logging.info(f"Successfully loaded {len(customers)} customers from CSV")
         return customers
@@ -84,16 +88,18 @@ def read_customer_csv(csv_path):
         logging.error(f"Error reading customer CSV: {e}")
         raise
 
-import base64
 
-def get_auth_header(username, password):
-    token = base64.b64encode(f"{username}:{password}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
+def get_auth_header(auth_method, auth1, auth2):
+    if auth_method == "Basic":
+        token = base64.b64encode(f"{auth1}:{auth2}".encode()).decode()
+    else:
+        token = auth1
+    return {"Authorization": f"{auth_method} {token}"}
 
-def fetch_apis(base_url, headers, session):
+def fetch_apis(customer_csv, headers, session):
     """Fetch APIs using v2 endpoint with pagination"""
     all_apis = []
-    base_url = get_v2_base_url(base_url.split('/management/')[0])
+    base_url = get_v2_base_url(customer_csv)
 
     page = 1
     per_page = 100
@@ -132,10 +138,10 @@ def fetch_apis(base_url, headers, session):
 
     return all_apis
 
-def fetch_api_plans(api_id, base_url, headers, session):
+def fetch_api_plans(api_id, customer_csv, headers, session):
     """Fetch API plans using V2 endpoint with pagination"""
     try:
-        url = f"{get_v2_base_url(base_url)}/apis/{api_id}/plans?page=1&perPage=9999&statuses=STAGING,PUBLISHED,DEPRECATED,CLOSED"
+        url = f"{get_v2_base_url(customer_csv)}/apis/{api_id}/plans?page=1&perPage=9999&statuses=STAGING,PUBLISHED,DEPRECATED,CLOSED"
         logging.info(f"Fetching API plans from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -149,10 +155,10 @@ def fetch_api_plans(api_id, base_url, headers, session):
         logging.error(f"Failed to fetch plans for API {api_id}: {e}")
         return []
 
-def fetch_api_pages(api_id, base_url, headers, session):
+def fetch_api_pages(api_id, customer_csv, headers, session):
     """Fetch API documentation pages using V2 endpoint with enhanced processing"""
     try:
-        url = f"{get_v2_base_url(base_url)}/apis/{api_id}/pages"
+        url = f"{get_v2_base_url(customer_csv)}/apis/{api_id}/pages"
         logging.info(f"Fetching API pages from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -217,10 +223,10 @@ def fetch_api_pages(api_id, base_url, headers, session):
             }
         }
 
-def fetch_api_details(api_id, base_url, headers, session):
+def fetch_api_details(api_id, customer_csv, headers, session):
     """Fetch detailed API information"""
     try:
-        url = f"{get_v2_base_url(base_url)}/apis/{api_id}"
+        url = f"{get_v2_base_url(customer_csv)}/apis/{api_id}"
         logging.info(f"Fetching API details from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -229,10 +235,10 @@ def fetch_api_details(api_id, base_url, headers, session):
         logging.error(f"Failed to fetch API details for {api_id}: {e}")
         return {}
 
-def fetch_api_subscriptions(api_id, base_url, headers, session):
+def fetch_api_subscriptions(api_id, customer_csv, headers, session):
     """Fetch API subscriptions"""
     try:
-        url = f"{get_v2_base_url(base_url)}/apis/{api_id}/subscriptions?status=ACCEPTED,CLOSED,PAUSED,PENDING,REJECTED,RESUMED"
+        url = f"{get_v2_base_url(customer_csv)}/apis/{api_id}/subscriptions?status=ACCEPTED,CLOSED,PAUSED,PENDING,REJECTED,RESUMED"
         logging.info(f"Fetching API subscriptions from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -242,10 +248,10 @@ def fetch_api_subscriptions(api_id, base_url, headers, session):
         logging.error(f"Failed to fetch subscriptions for API {api_id}: {e}")
         return []
 
-def fetch_api_alerts(api_id, base_url, headers, session):
+def fetch_api_alerts(api_id, customer_csv, headers, session):
     """Fetch API alerts using V1 endpoint"""
     try:
-        url = f"{get_v1_base_url(base_url)}/apis/{api_id}/alerts"
+        url = f"{get_v1_base_url(customer_csv)}/apis/{api_id}/alerts"
         logging.info(f"Fetching API alerts from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -254,10 +260,10 @@ def fetch_api_alerts(api_id, base_url, headers, session):
         logging.error(f"Failed to fetch alerts for API {api_id}: {e}")
         return []
 
-def fetch_applications(base_url, headers, session):
+def fetch_applications(customer_csv, headers, session):
     """Fetch applications using V1 endpoint"""
     try:
-        url = f"{get_v1_base_url(base_url)}/applications"
+        url = f"{get_v1_base_url(customer_csv)}/applications"
         logging.info(f"Fetching applications from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -266,10 +272,10 @@ def fetch_applications(base_url, headers, session):
         logging.error(f"Failed to fetch applications: {e}")
         return []
 
-def fetch_app_subscriptions(app_id, base_url, headers, session):
+def fetch_app_subscriptions(app_id, customer_csv, headers, session):
     """Fetch application subscriptions using V1 endpoint"""
     try:
-        url = f"{get_v1_base_url(base_url)}/applications/{app_id}/subscribed"
+        url = f"{get_v1_base_url(customer_csv)}/applications/{app_id}/subscribed"
         logging.info(f"Fetching app subscriptions from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -278,10 +284,10 @@ def fetch_app_subscriptions(app_id, base_url, headers, session):
         logging.error(f"Failed to fetch subscriptions for app {app_id}: {e}")
         return []
 
-def fetch_app_alerts(app_id, base_url, headers, session):
+def fetch_app_alerts(app_id, customer_csv, headers, session):
     """Fetch application alerts using V1 endpoint"""
     try:
-        url = f"{get_v1_base_url(base_url)}/applications/{app_id}/alerts"
+        url = f"{get_v1_base_url(customer_csv)}/applications/{app_id}/alerts"
         logging.info(f"Fetching app alerts from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -290,7 +296,7 @@ def fetch_app_alerts(app_id, base_url, headers, session):
         logging.error(f"Failed to fetch alerts for app {app_id}: {e}")
         return []
 
-def fetch_users(base_url, headers, session):
+def fetch_users(customer_csv, headers, session):
     """Fetch users using V1 endpoint with pagination"""
     all_users = []
     page = 1
@@ -298,7 +304,7 @@ def fetch_users(base_url, headers, session):
 
     while True:
         try:
-            url = f"{get_v1_base_url(base_url)}/users?page={page}&size={per_page}"
+            url = f"{get_v1_base_url(customer_csv)}/users?page={page}&size={per_page}"
             logging.info(f"Fetching users page {page} from: {url}")
             response = session.get(url, headers=headers)
             response.raise_for_status()
@@ -331,10 +337,10 @@ def fetch_users(base_url, headers, session):
 
     return all_users
 
-def fetch_gko_apis(base_url, headers, session):
+def fetch_gko_apis(customer_csv, headers, session):
     """Fetch GKO-managed APIs using V1 endpoint"""
     try:
-        url = f"{get_v1_base_url(base_url)}/apis"
+        url = f"{get_v1_base_url(customer_csv)}/apis"
         logging.info(f"Fetching GKO APIs from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -353,10 +359,10 @@ def fetch_gko_apis(base_url, headers, session):
         logging.error(f"Failed to fetch GKO APIs: {e}")
         return []
 
-def fetch_dictionaries(base_url, headers, session):
+def fetch_dictionaries(customer_csv, headers, session):
     """Fetch dictionaries using V1 endpoint"""
     try:
-        url = f"{get_v1_base_url(base_url)}/configuration/dictionaries"
+        url = f"{get_v1_base_url(customer_csv)}/configuration/dictionaries"
         logging.info(f"Fetching dictionaries from: {url}")
         response = session.get(url, headers=headers)
         response.raise_for_status()
@@ -397,6 +403,26 @@ def map_policy_name(policy_name):
         "Assign metrics": "Assign Metrics"
     }
     return POLICY_MAP.get(policy_name, policy_name)
+def redact_sensitive_config(config):
+    if not isinstance(config, dict):
+        return config
+
+    redacted = {}
+    for key, value in config.items():
+        key_lower = key.lower()
+        if key_lower in {"authorization", "value", "token", "secret", "password"}:
+            redacted[key] = "[REDACTED]"
+        elif isinstance(value, list):
+            redacted[key] = [
+                {
+                    k: "[REDACTED]" if k.lower() in {"authorization", "value", "token", "secret", "password"} else v
+                    for k, v in item.items()
+                } if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            redacted[key] = value
+    return redacted
 
 def extract_policies_from_flows(flows, plan_name="", plan_security=""):
     """Extract and map policy names from API flows"""
@@ -426,7 +452,7 @@ def extract_policies_from_flows(flows, plan_name="", plan_security=""):
                 "enabled": policy.get("enabled", False),
                 "plan_name": plan_name,
                 "plan_security": plan_security,
-                "configuration": policy.get("configuration", {}),
+                "configuration": redact_sensitive_config(policy.get("configuration", {})),
                 "description": policy.get("description", "")
             }
             flow_policies["pre_policies"].append(policy_info)
@@ -444,7 +470,7 @@ def extract_policies_from_flows(flows, plan_name="", plan_security=""):
                 "enabled": policy.get("enabled", False),
                 "plan_name": plan_name,
                 "plan_security": plan_security,
-                "configuration": policy.get("configuration", {}),
+                "configuration": redact_sensitive_config(policy.get("configuration", {})),
                 "description": policy.get("description", "")
             }
             flow_policies["post_policies"].append(policy_info)
@@ -454,13 +480,13 @@ def extract_policies_from_flows(flows, plan_name="", plan_security=""):
 
     return policies_info
 
-def fetch_api_analytics(api_id, base_url, headers, session, days=30):
+def fetch_api_analytics(api_id, customer_csv, headers, session, days=30):
     """Fetch API analytics (hit counts) for a given time period"""
     try:
         current_time = int(time.time() * 1000)
         from_time = current_time - (days * 24 * 60 * 60 * 1000)
 
-        url = f"{base_url}/management/organizations/DEFAULT/environments/DEFAULT/apis/{api_id}/analytics"
+        url = f"{get_v1_base_url(customer_csv)}/apis/{api_id}/analytics"
         params = {
             'type': 'COUNT',
             'from': from_time,
@@ -488,7 +514,7 @@ def fetch_api_analytics(api_id, base_url, headers, session, days=30):
             "error": str(e)
         }
 
-def process_api_details(api_id, api_name, api_details, collected_data, base_url, headers, session):
+def process_api_details(api_id, api_name, api_details, collected_data, customer_csv, headers, session):
     """Process details for a single API with enhanced documentation handling"""
     try:
         # Initialize API data structure
@@ -542,7 +568,7 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
 
         # Process dictionaries
         try:
-            dictionaries = fetch_dictionaries(base_url, headers, session)
+            dictionaries = fetch_dictionaries(customer_csv, headers, session)
             dictionary_types = {}
             for dictionary in dictionaries:
                 dict_type = dictionary.get("type", "unknown")
@@ -560,7 +586,7 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
 
         # Process documentation pages with enhanced information
         try:
-            documentation = fetch_api_pages(api_id, base_url, headers, session)
+            documentation = fetch_api_pages(api_id, customer_csv, headers, session)
             api_data["documentation"] = documentation
 
             # Extract fetchers from pages
@@ -598,7 +624,7 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
             }
 
         # Fetch and process plans
-        plans = fetch_api_plans(api_id, base_url, headers, session)
+        plans = fetch_api_plans(api_id, customer_csv, headers, session)
         plan_type_counts = {}
 
         for plan in plans:
@@ -627,9 +653,10 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
                 "type": plan.get("type", "unknown")
             }
 
-            # Add security configuration if available
-            if isinstance(plan.get("security"), dict) and "configuration" in plan.get("security", {}):
-                plan_data["security_config"] = plan.get("security", {}).get("configuration", {})
+            # Add minimal security config info for analytics only
+            if isinstance(plan.get("security"), dict):
+                plan_data["security_signature"] = plan["security"].get("configuration", {}).get("signature", "")
+                # Don't log resolverParameter or other secrets
 
             # Process flows if available
             plan_flows = plan.get("flows", [])
@@ -700,11 +727,11 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
         api_data["plans"]["total"] = len(plans)
 
         # Process subscriptions
-        subscriptions = fetch_api_subscriptions(api_id, base_url, headers, session)
+        subscriptions = fetch_api_subscriptions(api_id, customer_csv, headers, session)
         api_data["subscriptions"]["count"] = len(subscriptions)
 
         # Process alerts
-        alerts = fetch_api_alerts(api_id, base_url, headers, session)
+        alerts = fetch_api_alerts(api_id, customer_csv, headers, session)
         api_data["alerts"]["count"] = len(alerts)
 
         # Process flows
@@ -752,7 +779,7 @@ def process_api_details(api_id, api_name, api_details, collected_data, base_url,
         
         # Fetch API analytics
         try:
-            analytics = fetch_api_analytics(api_id, base_url, headers, session)
+            analytics = fetch_api_analytics(api_id, customer_csv, headers, session)
             api_data["analytics"] = analytics
             logging.info(f"API {api_id} had {analytics['total_hits']} hits in last 30 days")
         except Exception as e:
@@ -794,12 +821,15 @@ def main():
         for customer in customers:
             try:
                 logging.info(f"Processing customer: {customer['customer_name']}")
+                if customer['auth_method'] not in ('Bearer', 'Basic'):
+                    logging.error(f"Unknown authentication method. It must be 'Bearer' or 'Basic'")
+                    continue
 
-                if not customer['username'] or not customer['password']:
+                if customer['auth_method'] == 'Basic' and (not customer['auth1'] or not customer['auth2']):
                     logging.error(f"Missing username or password for customer {customer['customer_name']}")
                     continue
 
-                headers = get_auth_header(customer['username'], customer['password'])
+                headers = get_auth_header(customer['auth_method'], customer['auth1'], customer['auth2'])
 
                 # Initialize data collection
                 # Initialize data collection structure
@@ -808,6 +838,8 @@ def main():
                         "customer_id": get_customer_id(customer['gravitee_url']),
                         "customer_name": customer['customer_name'],
                         "gravitee_url": customer['gravitee_url'],
+                        "org_id": customer['org_id'],
+                        "env_id": customer['env_id'],
                         "extraction_date": datetime.datetime.now().isoformat()
                     },
                     "apis": {
@@ -833,7 +865,7 @@ def main():
 
                 # Fetch and process GKO APIs
                 try:
-                    gko_apis = fetch_gko_apis(customer['gravitee_url'], headers, session)
+                    gko_apis = fetch_gko_apis(customer, headers, session)
                     collected_data["gko"]["apis_count"] = len(gko_apis)
 
                     # Add additional GKO details
@@ -866,7 +898,7 @@ def main():
 
                 # Fetch and process Users
                 try:
-                    users = fetch_users(customer['gravitee_url'], headers, session)
+                    users = fetch_users(customer, headers, session)
                     collected_data["users"]["total_count"] = len(users)
                     logging.info(f"Found {len(users)} users for {customer['customer_name']}")
 
@@ -931,7 +963,7 @@ def main():
 
                 # Fetch and process Applications
                 try:
-                    applications = fetch_applications(customer['gravitee_url'], headers, session)
+                    applications = fetch_applications(customer, headers, session)
                     collected_data["applications"]["total_count"] = len(applications)
                     logging.info(f"Found {len(applications)} applications for {customer['customer_name']}")
 
@@ -974,7 +1006,7 @@ def main():
 
                         # Fetch and process app subscriptions
                         try:
-                            subscriptions = fetch_app_subscriptions(app_id, customer['gravitee_url'], headers, session)
+                            subscriptions = fetch_app_subscriptions(app_id, customer, headers, session)
                             app_data["subscriptions"]["count"] = len(subscriptions)
                             app_data["subscriptions"]["details"] = [{
                                 "api": sub.get("api", {}).get("name", "unknown"),
@@ -986,7 +1018,7 @@ def main():
 
                         # Fetch and process app alerts
                         try:
-                            alerts = fetch_app_alerts(app_id, customer['gravitee_url'], headers, session)
+                            alerts = fetch_app_alerts(app_id, customer, headers, session)
                             app_data["alerts"]["count"] = len(alerts)
                         except Exception as e:
                             logging.error(f"Error processing alerts for app {app_id}: {e}")
@@ -998,7 +1030,7 @@ def main():
                     logging.error(f"Error processing applications for {customer['customer_name']}: {e}")
 
                 # Fetch and process APIs
-                apis = fetch_apis(customer['gravitee_url'], headers, session)
+                apis = fetch_apis(customer, headers, session)
                 if not apis:
                     logging.error(f"No APIs found for customer {customer['customer_name']}")
                     continue
@@ -1016,7 +1048,7 @@ def main():
 
                     try:
                         # Fetch detailed API information
-                        api_details = fetch_api_details(api_id, customer['gravitee_url'], headers, session)
+                        api_details = fetch_api_details(api_id, customer, headers, session)
                         if not api_details:
                             logging.error(f"Could not fetch details for API {api_id}")
                             continue
@@ -1027,7 +1059,7 @@ def main():
                             api_name,
                             api_details,
                             collected_data,
-                            customer['gravitee_url'],
+                            customer,
                             headers,
                             session
                         )
@@ -1044,10 +1076,18 @@ def main():
                         customer_id = get_customer_id(customer['gravitee_url'])
                         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
-                        # Save main data file
+                                                # Determine output file name
+                        customer_id = get_customer_id(customer['gravitee_url'])
+                        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
                         filename = f"{output_dir}/gravitee_data_{customer_id}_{timestamp}.json"
+
+                        # Keep only the fields that map to BigQuery tables
+                        keys_to_keep = ["apis", "applications", "users", "gko", "dictionaries", "customer_info"]
+                        filtered_data = {key: collected_data[key] for key in keys_to_keep if key in collected_data}
+
+                        # Save filtered data file
                         with open(filename, 'w', encoding='utf-8') as f:
-                            json.dump(collected_data, f, indent=2, ensure_ascii=False)
+                            json.dump(filtered_data, f, indent=2, ensure_ascii=False)
                         logging.info(f"Successfully saved data for {customer['customer_name']} to {filename}")
 
                         # Save summary file
