@@ -403,6 +403,26 @@ def map_policy_name(policy_name):
         "Assign metrics": "Assign Metrics"
     }
     return POLICY_MAP.get(policy_name, policy_name)
+def redact_sensitive_config(config):
+    if not isinstance(config, dict):
+        return config
+
+    redacted = {}
+    for key, value in config.items():
+        key_lower = key.lower()
+        if key_lower in {"authorization", "value", "token", "secret", "password"}:
+            redacted[key] = "[REDACTED]"
+        elif isinstance(value, list):
+            redacted[key] = [
+                {
+                    k: "[REDACTED]" if k.lower() in {"authorization", "value", "token", "secret", "password"} else v
+                    for k, v in item.items()
+                } if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            redacted[key] = value
+    return redacted
 
 def extract_policies_from_flows(flows, plan_name="", plan_security=""):
     """Extract and map policy names from API flows"""
@@ -432,7 +452,7 @@ def extract_policies_from_flows(flows, plan_name="", plan_security=""):
                 "enabled": policy.get("enabled", False),
                 "plan_name": plan_name,
                 "plan_security": plan_security,
-                "configuration": policy.get("configuration", {}),
+                "configuration": redact_sensitive_config(policy.get("configuration", {})),
                 "description": policy.get("description", "")
             }
             flow_policies["pre_policies"].append(policy_info)
@@ -450,7 +470,7 @@ def extract_policies_from_flows(flows, plan_name="", plan_security=""):
                 "enabled": policy.get("enabled", False),
                 "plan_name": plan_name,
                 "plan_security": plan_security,
-                "configuration": policy.get("configuration", {}),
+                "configuration": redact_sensitive_config(policy.get("configuration", {})),
                 "description": policy.get("description", "")
             }
             flow_policies["post_policies"].append(policy_info)
@@ -633,9 +653,10 @@ def process_api_details(api_id, api_name, api_details, collected_data, customer_
                 "type": plan.get("type", "unknown")
             }
 
-            # Add security configuration if available
-            if isinstance(plan.get("security"), dict) and "configuration" in plan.get("security", {}):
-                plan_data["security_config"] = plan.get("security", {}).get("configuration", {})
+            # Add minimal security config info for analytics only
+            if isinstance(plan.get("security"), dict):
+                plan_data["security_signature"] = plan["security"].get("configuration", {}).get("signature", "")
+                # Don't log resolverParameter or other secrets
 
             # Process flows if available
             plan_flows = plan.get("flows", [])
@@ -1055,10 +1076,18 @@ def main():
                         customer_id = get_customer_id(customer['gravitee_url'])
                         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
-                        # Save main data file
+                                                # Determine output file name
+                        customer_id = get_customer_id(customer['gravitee_url'])
+                        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
                         filename = f"{output_dir}/gravitee_data_{customer_id}_{timestamp}.json"
+
+                        # Keep only the fields that map to BigQuery tables
+                        keys_to_keep = ["apis", "applications", "users", "gko", "dictionaries", "customer_info"]
+                        filtered_data = {key: collected_data[key] for key in keys_to_keep if key in collected_data}
+
+                        # Save filtered data file
                         with open(filename, 'w', encoding='utf-8') as f:
-                            json.dump(collected_data, f, indent=2, ensure_ascii=False)
+                            json.dump(filtered_data, f, indent=2, ensure_ascii=False)
                         logging.info(f"Successfully saved data for {customer['customer_name']} to {filename}")
 
                         # Save summary file
